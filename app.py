@@ -54,7 +54,6 @@ def get_sheet():
 
 def append_row_to_sheet(row: dict):
     ws = get_sheet()
-    # Ajuste a ordem para bater com seu cabeçalho
     ordered = [
         row.get("timestamp", ""),
         row.get("caminho", ""),
@@ -195,7 +194,7 @@ async def on_menu_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["sched_step"] = 0
         context.user_data["sched"] = {}
 
-        field, prompt = SCHED_FIELDS[0]
+        _, prompt = SCHED_FIELDS[0]
         await query.edit_message_text(
             f"FAZER AGENDAMENTO\n\n{prompt}"
         )
@@ -218,7 +217,7 @@ async def on_elig_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["sched_step"] = 0
         context.user_data["sched"] = {}
 
-        field, prompt = SCHED_FIELDS[0]
+        _, prompt = SCHED_FIELDS[0]
         await query.edit_message_text(
             "✅ Paciente ELEGÍVEL para avaliação geriátrica perioperatória.\n\n"
             f"Critério positivo: {key}\n\n"
@@ -239,7 +238,6 @@ async def on_elig_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ PACIENTE NÃO ELEGÍVEL pelos critérios do bot.\n\n"
             "Se ainda houver dúvida clínica, considere discutir o caso com a equipe de geriatria."
         )
-        # volta menu
         await query.message.reply_text("Menu:", reply_markup=main_menu_kb())
         return
 
@@ -250,42 +248,6 @@ async def on_elig_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def on_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Recebe texto durante o modo "sched", exceto quando for escolher prioridade/confirmar (que é via botão)
-    if context.user_data.get("mode") != "sched":
-        await update.message.reply_text("Digite /start para abrir o menu.")
-        return
-
-    step = context.user_data.get("sched_step", 0)
-
-    # Se step aponta para um campo normal (texto)
-    field, prompt = SCHED_FIELDS[step]
-
-    # prioridade é via botões, então quando chegar nela, não deve aceitar texto
-    if field == "prioridade":
-        await update.message.reply_text("Escolha a prioridade pelos botões abaixo:", reply_markup=priority_kb())
-        return
-
-    value = (update.message.text or "").strip()
-    if not value:
-        await update.message.reply_text("Não entendi. Tente novamente.")
-        return
-
-    context.user_data["sched"][field] = value
-
-    # avançar
-    step += 1
-    context.user_data["sched_step"] = step
-
-    # se próximo for prioridade, mostrar botões
-    next_field, next_prompt = SCHED_FIELDS[step]
-    if next_field == "prioridade":
-        await update.message.reply_text(next_prompt, reply_markup=priority_kb())
-        return
-
-    await update.message.reply_text(next_prompt)
-
-
 async def on_priority(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -293,15 +255,13 @@ async def on_priority(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _, prio = query.data.split(":")
 
     # salva prioridade
-    # step atual deve estar no campo prioridade
     context.user_data["sched"]["prioridade"] = prio
 
     # avançar para observações (texto)
-    # encontra índice do campo prioridade
     idx = [i for i, (f, _) in enumerate(SCHED_FIELDS) if f == "prioridade"][0]
     context.user_data["sched_step"] = idx + 1
 
-    next_field, next_prompt = SCHED_FIELDS[idx + 1]
+    _, next_prompt = SCHED_FIELDS[idx + 1]
     await query.edit_message_text(next_prompt)
 
 
@@ -316,7 +276,6 @@ async def on_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reset_flow(context)
         return
 
-    # CONFIRMAR -> envia para sheets
     sched = context.user_data.get("sched", {})
     user = query.from_user
 
@@ -360,38 +319,80 @@ async def on_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reset_flow(context)
 
 
-async def maybe_finish_sched(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Quando o usuário termina 'observacoes', mostramos um resumo e pedimos confirmar.
-    Chamado dentro do on_text_message quando step avançar além do último.
-    """
-    pass
-
-
 async def on_text_message_with_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # wrapper que chama on_text_message e depois verifica se chegou ao final
-    await on_text_message(update, context)
-
     if context.user_data.get("mode") != "sched":
+        await update.message.reply_text("Digite /start para abrir o menu.")
         return
 
     step = context.user_data.get("sched_step", 0)
+
+    # Guard: evita IndexError se o usuário digitar depois de finalizar os campos
+    if step is None:
+        context.user_data["sched_step"] = 0
+        step = 0
+
     if step >= len(SCHED_FIELDS):
-        # terminou: mostrar resumo e confirmar
+        await update.message.reply_text(
+            "Você já chegou na confirmação. Use os botões abaixo para confirmar ou cancelar.",
+            reply_markup=confirm_kb()
+        )
+        return
+
+    field, prompt = SCHED_FIELDS[step]
+
+    # PRIORIDADE é tratada por botão
+    if field == "prioridade":
+        await update.message.reply_text(
+            "Escolha a prioridade pelos botões abaixo:",
+            reply_markup=priority_kb()
+        )
+        return
+
+    value = (update.message.text or "").strip()
+    if not value:
+        await update.message.reply_text("Não entendi. Tente novamente.")
+        return
+
+    # Salva valor
+    context.user_data["sched"][field] = value
+
+    # Avança etapa
+    step += 1
+    context.user_data["sched_step"] = step
+
+    # Terminou todos os campos → resumo + confirmação
+    if step >= len(SCHED_FIELDS):
         sched = context.user_data.get("sched", {})
 
         resumo = (
-            "CONFIRMAR INFORMAÇÕES:\n\n"
-            f"Nome do paciente: {sched.get('nome_paciente','')}\n"
-            f"Prontuário: {sched.get('prontuario','')}\n"
-            f"Cirurgião: {sched.get('nome_cirurgiao','')}\n"
-            f"Cirurgia proposta: {sched.get('cirurgia_proposta','')}\n"
-            f"Data cirurgia (prevista): {sched.get('data_cirurgia_prevista','')}\n"
-            f"Prioridade: {sched.get('prioridade','')}\n"
-            f"Observações: {sched.get('observacoes','')}\n"
+            "📝 *CONFIRMAR SOLICITAÇÃO*\n\n"
+            f"*Paciente:* {sched.get('nome_paciente','')}\n"
+            f"*Prontuário:* {sched.get('prontuario','')}\n"
+            f"*Cirurgião:* {sched.get('nome_cirurgiao','')}\n"
+            f"*Cirurgia proposta:* {sched.get('cirurgia_proposta','')}\n"
+            f"*Data prevista:* {sched.get('data_cirurgia_prevista','')}\n"
+            f"*Prioridade:* {sched.get('prioridade','')}\n"
+            f"*Observações:* {sched.get('observacoes','')}\n\n"
+            "Deseja confirmar o envio para o ambulatório de Geriatria Perioperatória?"
         )
 
-        await update.message.reply_text(resumo, reply_markup=confirm_kb())
+        await update.message.reply_text(
+            resumo,
+            parse_mode="Markdown",
+            reply_markup=confirm_kb()
+        )
+        return
+
+    next_field, next_prompt = SCHED_FIELDS[step]
+
+    if next_field == "prioridade":
+        await update.message.reply_text(
+            next_prompt,
+            reply_markup=priority_kb()
+        )
+        return
+
+    await update.message.reply_text(next_prompt)
 
 
 def build_app() -> Application:
@@ -404,7 +405,6 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(on_priority, pattern=r"^PRIO:"))
     app.add_handler(CallbackQueryHandler(on_confirm, pattern=r"^CONFIRM:"))
 
-    # texto do usuário (agendamento)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text_message_with_finish))
 
     return app
@@ -413,7 +413,6 @@ def build_app() -> Application:
 if __name__ == "__main__":
     application = build_app()
 
-    # Webhook para Render
     if not RENDER_EXTERNAL_URL:
         raise RuntimeError("Faltou RENDER_EXTERNAL_URL nas variáveis de ambiente do Render.")
 
