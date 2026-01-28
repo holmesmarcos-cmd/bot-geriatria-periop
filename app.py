@@ -49,21 +49,20 @@ _PT_MONTHS = {
     "dezembro": 12, "dez": 12,
 }
 
+# Mapeia coluna B..G (V1..V6) para horários
+SLOT_TIMES = {
+    1: "08:00",
+    2: "08:45",
+    3: "09:30",
+    4: "10:15",
+    5: "11:00",
+    6: "11:45",
+}
+
 def _today_local() -> date:
-    # Usa timezone local configurado no ambiente (Render costuma ficar OK com astimezone()).
     return datetime.now(timezone.utc).astimezone().date()
 
 def parse_data_prevista(s: str):
-    """
-    Interpreta:
-    - yyyy-mm-dd
-    - dd/mm/yyyy
-    - dd/mm/yy
-    - mm/yyyy (assume dia 01)
-    - "abril/2026" (assume dia 01)
-    - "abril 2026" (assume dia 01)
-    Retorna date ou None.
-    """
     if not s:
         return None
 
@@ -75,7 +74,6 @@ def parse_data_prevista(s: str):
         except Exception:
             pass
 
-    # mm/yyyy
     try:
         return datetime.strptime("01/" + raw, "%d/%m/%Y").date()
     except Exception:
@@ -142,8 +140,7 @@ def find_slots():
     values = ws.get_all_values()
     slots = []
 
-    # pula cabeçalho (linha 1)
-    for r in range(1, len(values)):
+    for r in range(1, len(values)):  # pula cabeçalho
         row_vals = values[r] if values[r] else []
         date_str = row_vals[0] if len(row_vals) > 0 else ""
         if not date_str:
@@ -153,12 +150,14 @@ def find_slots():
         for c in range(1, 7):
             cell_val = row_vals[c] if len(row_vals) > c else ""
             if (cell_val or "").strip() == "":
+                hora = SLOT_TIMES.get(c, f"V{c}")
                 slots.append({
                     "row": r + 1,        # 1-based
                     "col": c + 1,        # 1-based
-                    "label": f"{date_str} – V{c}",
+                    "label": f"{date_str} – {hora}",
                     "date": date_str,
                     "slot": f"V{c}",
+                    "time": hora,
                 })
                 if len(slots) >= AGENDA_MAX_OPTIONS:
                     return slots
@@ -178,14 +177,14 @@ def book_slot(row, col, text):
 # =========================
 def reset(ctx):
     ctx.user_data.clear()
-    ctx.user_data["mode"] = None         # "elig" | "sched"
+    ctx.user_data["mode"] = None
     ctx.user_data["elig_step"] = 0
-    ctx.user_data["eligible"] = None     # "SIM" | "NAO"
-    ctx.user_data["criterio"] = ""       # qual pergunta deu SIM
-    ctx.user_data["step"] = 0            # passo do agendamento
-    ctx.user_data["data"] = {}           # dados do agendamento
-    ctx.user_data["booking_text"] = ""   # texto que vai para a célula
-    ctx.user_data["slots_cache"] = []    # slots mostrados
+    ctx.user_data["eligible"] = None
+    ctx.user_data["criterio"] = ""
+    ctx.user_data["step"] = 0
+    ctx.user_data["data"] = {}
+    ctx.user_data["booking_text"] = ""
+    ctx.user_data["slots_cache"] = []
 
 # =========================
 # UI
@@ -214,6 +213,13 @@ def confirm_kb():
         ]
     ])
 
+def build_slots_kb(slots):
+    kb = []
+    for s in slots:
+        kb.append([InlineKeyboardButton(s["label"], callback_data=f"SLOT:{s['row']}:{s['col']}")])
+    kb.append([InlineKeyboardButton("CANCELAR", callback_data="SLOT:CANCEL")])
+    return InlineKeyboardMarkup(kb)
+
 # =========================
 # FLUXO (imagem)
 # =========================
@@ -234,7 +240,6 @@ ELIG_QUESTIONS = [
                     "Ex: cansa ao andar 1 quadra ou subir 1 lance de escadas (10 degraus), mobilidade reduzida/lentificada"),
 ]
 
-# Agendamento (SEM prioridade, como você decidiu)
 FIELDS = [
     ("nome", "Nome do paciente:"),
     ("prontuario", "Prontuário:"),
@@ -249,7 +254,12 @@ FIELDS = [
 # =========================
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     reset(ctx)
-    await update.message.reply_text("Escolha uma opção:", reply_markup=menu())
+    await update.message.reply_text(
+        "Olá, sou um bot para agendamento de consulta no Ambulatório de Geriatria PeriOp "
+        "(uso exclusivo de cirurgiões).\n\n"
+        "Clique abaixo no que deseja fazer agora:",
+        reply_markup=menu()
+    )
 
 async def on_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -279,11 +289,9 @@ async def on_elig(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
 
-    # callback: ELIG:<key>:SIM|NAO
     _, key, ans = q.data.split(":")
 
     if ans == "SIM":
-        # elegível -> entra em agendamento
         ctx.user_data["eligible"] = "SIM"
         ctx.user_data["criterio"] = key
         ctx.user_data["mode"] = "sched"
@@ -297,7 +305,6 @@ async def on_elig(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ans == NAO -> próxima pergunta
     step = int(ctx.user_data.get("elig_step", 0)) + 1
     ctx.user_data["elig_step"] = step
 
@@ -327,13 +334,12 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if step >= len(FIELDS):
         return
 
-    field, _prompt = FIELDS[step]
+    field, _ = FIELDS[step]
     value = (update.message.text or "").strip()
     if not value:
         await update.message.reply_text("Não entendi. Tente novamente.")
         return
 
-    # bloqueio: data prevista no passado (quando interpretável)
     if field == "data_prevista":
         parsed = parse_data_prevista(value)
         if parsed is not None and parsed < _today_local():
@@ -347,7 +353,6 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     step += 1
     ctx.user_data["step"] = step
 
-    # terminou perguntas -> resumo + confirmação
     if step >= len(FIELDS):
         d = ctx.user_data.get("data", {})
         resumo = (
@@ -363,7 +368,6 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(resumo, parse_mode="Markdown", reply_markup=confirm_kb())
         return
 
-    # próxima pergunta
     await update.message.reply_text(FIELDS[step][1])
 
 async def on_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -378,7 +382,6 @@ async def on_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         reset(ctx)
         return
 
-    # CONFIRMAR -> monta texto único e mostra vagas
     d = ctx.user_data.get("data", {})
     texto = (
         "📝 CONFIRMAR SOLICITAÇÃO\n"
@@ -399,13 +402,7 @@ async def on_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     ctx.user_data["slots_cache"] = slots
-
-    kb = []
-    for s in slots:
-        kb.append([InlineKeyboardButton(s["label"], callback_data=f"SLOT:{s['row']}:{s['col']}")])
-    kb.append([InlineKeyboardButton("CANCELAR", callback_data="SLOT:CANCEL")])
-
-    await q.edit_message_text("Escolha uma vaga:", reply_markup=InlineKeyboardMarkup(kb))
+    await q.edit_message_text("Escolha uma vaga:", reply_markup=build_slots_kb(slots))
 
 async def on_slot(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -421,8 +418,22 @@ async def on_slot(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     r_i, c_i = int(r), int(c)
 
     ok = book_slot(r_i, c_i, ctx.user_data.get("booking_text", ""))
+
+    # ✅ AJUSTE: se ocupou, recarrega vagas atualizadas e mostra de novo
     if not ok:
-        await q.edit_message_text("Vaga ocupada. Use /start e tente novamente para ver vagas atualizadas.")
+        slots = find_slots()
+        if not slots:
+            await q.edit_message_text("⚠️ Essa vaga acabou de ser preenchida e não há outras disponíveis agora.")
+            await q.message.reply_text("Menu:", reply_markup=menu())
+            reset(ctx)
+            return
+
+        ctx.user_data["slots_cache"] = slots
+        await q.edit_message_text(
+            "⚠️ Essa vaga acabou de ser preenchida.\n"
+            "Selecione outra vaga disponível:",
+            reply_markup=build_slots_kb(slots)
+        )
         return
 
     # identifica label do slot escolhido (para log)
@@ -432,7 +443,6 @@ async def on_slot(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             slot_label = s.get("label", "")
             break
 
-    # log em SOLICITACOES
     u = q.from_user
     d = ctx.user_data.get("data", {})
     now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
@@ -453,23 +463,18 @@ async def on_slot(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "telegram_user": u.username or "",
     })
 
-    await q.edit_message_text(
-        "✅ Agendamento realizado.\n\n"
-        "Solicitação registrada e vaga preenchida na agenda."
-    )
+    await q.edit_message_text("✅ Agendamento confirmado.")
     await q.message.reply_text("Menu:", reply_markup=menu())
     reset(ctx)
 
 def build_app():
     app = Application.builder().token(BOT_TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(on_menu, pattern=r"^MENU:"))
     app.add_handler(CallbackQueryHandler(on_elig, pattern=r"^ELIG:"))
     app.add_handler(CallbackQueryHandler(on_confirm, pattern=r"^CONFIRM:"))
     app.add_handler(CallbackQueryHandler(on_slot, pattern=r"^SLOT:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
-
     return app
 
 if __name__ == "__main__":
