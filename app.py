@@ -28,6 +28,9 @@ PORT = int(os.getenv("PORT", "10000"))
 AGENDA_WORKSHEET_NAME = os.getenv("AGENDA_WORKSHEET_NAME", "AGENDA").strip()
 AGENDA_MAX_OPTIONS = int(os.getenv("AGENDA_MAX_OPTIONS", "8"))
 
+# >>> NOVO: caminho fixo do webhook (combina com o /webhook que você configurou no Telegram)
+WEBHOOK_PATH = "webhook"
+
 if not BOT_TOKEN or not SHEET_ID or not GOOGLE_CREDS_JSON:
     raise RuntimeError("Variáveis de ambiente obrigatórias ausentes (BOT_TOKEN, SHEET_ID, GOOGLE_CREDS_JSON).")
 
@@ -419,7 +422,7 @@ async def on_slot(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     ok = book_slot(r_i, c_i, ctx.user_data.get("booking_text", ""))
 
-    # ✅ AJUSTE: se ocupou, recarrega vagas atualizadas e mostra de novo
+    # se ocupou, recarrega vagas atualizadas e mostra de novo
     if not ok:
         slots = find_slots()
         if not slots:
@@ -478,13 +481,18 @@ def build_app():
     return app
 
 if __name__ == "__main__":
-    app = build_app()
+    tg_app = build_app()
+
     if not RENDER_EXTERNAL_URL:
         raise RuntimeError("Faltou RENDER_EXTERNAL_URL nas variáveis de ambiente do Render.")
-    app.run_webhook(
+
+    # O webhook precisa bater exatamente em: https://.../webhook
+    webhook_url = f"{RENDER_EXTERNAL_URL.rstrip('/')}/{WEBHOOK_PATH}"
+
+    tg_app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
-        url_path=BOT_TOKEN,
-        webhook_url=f"{RENDER_EXTERNAL_URL.rstrip('/')}/{BOT_TOKEN}",
+        url_path=WEBHOOK_PATH,          # <<< agora escuta em /webhook
+        webhook_url=webhook_url,        # <<< agora registra /webhook
         drop_pending_updates=True,
     )
