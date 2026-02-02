@@ -28,11 +28,13 @@ PORT = int(os.getenv("PORT", "10000"))
 AGENDA_WORKSHEET_NAME = os.getenv("AGENDA_WORKSHEET_NAME", "AGENDA").strip()
 AGENDA_MAX_OPTIONS = int(os.getenv("AGENDA_MAX_OPTIONS", "8"))
 
-# >>> NOVO: caminho fixo do webhook (combina com o /webhook que você configurou no Telegram)
+# Webhook fixo
 WEBHOOK_PATH = "webhook"
 
 if not BOT_TOKEN or not SHEET_ID or not GOOGLE_CREDS_JSON:
-    raise RuntimeError("Variáveis de ambiente obrigatórias ausentes (BOT_TOKEN, SHEET_ID, GOOGLE_CREDS_JSON).")
+    raise RuntimeError(
+        "Variáveis de ambiente obrigatórias ausentes (BOT_TOKEN, SHEET_ID, GOOGLE_CREDS_JSON)."
+    )
 
 # =========================
 # HELPERS (DATA)
@@ -77,6 +79,7 @@ def parse_data_prevista(s: str):
         except Exception:
             pass
 
+    # tenta "mm/YYYY" interpretando como 01/mm/YYYY
     try:
         return datetime.strptime("01/" + raw, "%d/%m/%Y").date()
     except Exception:
@@ -119,21 +122,24 @@ def get_sheet(name):
 
 def append_log(row: dict):
     ws = get_sheet(WORKSHEET_NAME)
-    ws.append_row([
-        row.get("timestamp", ""),
-        row.get("caminho", ""),
-        row.get("elegivel", ""),
-        row.get("criterio", ""),
-        row.get("nome", ""),
-        row.get("prontuario", ""),
-        row.get("cirurgiao", ""),
-        row.get("cirurgia", ""),
-        row.get("data_prevista", ""),
-        row.get("observacoes", ""),
-        row.get("slot_escolhido", ""),
-        row.get("telegram_id", ""),
-        row.get("telegram_user", ""),
-    ], value_input_option="USER_ENTERED")
+    ws.append_row(
+        [
+            row.get("timestamp", ""),
+            row.get("caminho", ""),
+            row.get("elegivel", ""),
+            row.get("criterio", ""),
+            row.get("nome", ""),
+            row.get("prontuario", ""),
+            row.get("cirurgiao", ""),
+            row.get("cirurgia", ""),
+            row.get("data_prevista", ""),
+            row.get("observacoes", ""),
+            row.get("slot_escolhido", ""),
+            row.get("telegram_id", ""),
+            row.get("telegram_user", ""),
+        ],
+        value_input_option="USER_ENTERED",
+    )
 
 # =========================
 # AGENDA (A=Data, B-G=6 vagas)
@@ -154,14 +160,16 @@ def find_slots():
             cell_val = row_vals[c] if len(row_vals) > c else ""
             if (cell_val or "").strip() == "":
                 hora = SLOT_TIMES.get(c, f"V{c}")
-                slots.append({
-                    "row": r + 1,        # 1-based
-                    "col": c + 1,        # 1-based
-                    "label": f"{date_str} – {hora}",
-                    "date": date_str,
-                    "slot": f"V{c}",
-                    "time": hora,
-                })
+                slots.append(
+                    {
+                        "row": r + 1,  # 1-based
+                        "col": c + 1,  # 1-based
+                        "label": f"{date_str} – {hora}",
+                        "date": date_str,
+                        "slot": f"V{c}",
+                        "time": hora,
+                    }
+                )
                 if len(slots) >= AGENDA_MAX_OPTIONS:
                     return slots
 
@@ -193,28 +201,34 @@ def reset(ctx):
 # UI
 # =========================
 def menu():
-    return InlineKeyboardMarkup([
+    return InlineKeyboardMarkup(
         [
-            InlineKeyboardButton("AVALIAR ELEGIBILIDADE", callback_data="MENU:ELIG"),
-            InlineKeyboardButton("FAZER AGENDAMENTO", callback_data="MENU:SCHED"),
+            [
+                InlineKeyboardButton("AVALIAR ELEGIBILIDADE", callback_data="MENU:ELIG"),
+                InlineKeyboardButton("FAZER AGENDAMENTO", callback_data="MENU:SCHED"),
+            ]
         ]
-    ])
+    )
 
 def yesno(prefix: str):
-    return InlineKeyboardMarkup([
+    return InlineKeyboardMarkup(
         [
-            InlineKeyboardButton("Sim", callback_data=f"{prefix}:SIM"),
-            InlineKeyboardButton("Não", callback_data=f"{prefix}:NAO"),
+            [
+                InlineKeyboardButton("Sim", callback_data=f"{prefix}:SIM"),
+                InlineKeyboardButton("Não", callback_data=f"{prefix}:NAO"),
+            ]
         ]
-    ])
+    )
 
 def confirm_kb():
-    return InlineKeyboardMarkup([
+    return InlineKeyboardMarkup(
         [
-            InlineKeyboardButton("CONFIRMAR", callback_data="CONFIRM:SIM"),
-            InlineKeyboardButton("CANCELAR", callback_data="CONFIRM:NAO"),
+            [
+                InlineKeyboardButton("CONFIRMAR", callback_data="CONFIRM:SIM"),
+                InlineKeyboardButton("CANCELAR", callback_data="CONFIRM:NAO"),
+            ]
         ]
-    ])
+    )
 
 def build_slots_kb(slots):
     kb = []
@@ -228,19 +242,31 @@ def build_slots_kb(slots):
 # =========================
 ELIG_QUESTIONS = [
     ("idade80", "Paciente ≥ 80 anos?"),
-    ("memoria", "Paciente tem problemas de memória?\n"
-               "- incapacidade para atividades do dia a dia por questões de memória\n"
-               "- não reconhece familiares\n"
-               "- não sabe dizer qual dia/mês/ano está"),
-    ("humor", "Paciente tem transtornos de humor?\n"
-             "- uso de antidepressivos\n"
-             "- labilidade emocional importante\n"
-             "- insônia ou alterações de comportamento"),
-    ("multimorbidade", "Paciente possui 5 ou mais doenças sistêmicas?\n"
-                       "Ex: HAS, DM, insuficiência cardíaca, DAC, DRC, doença hepática crônica, AVE"),
+    (
+        "memoria",
+        "Paciente tem problemas de memória?\n"
+        "- incapacidade para atividades do dia a dia por questões de memória\n"
+        "- não reconhece familiares\n"
+        "- não sabe dizer qual dia/mês/ano está",
+    ),
+    (
+        "humor",
+        "Paciente tem transtornos de humor?\n"
+        "- uso de antidepressivos\n"
+        "- labilidade emocional importante\n"
+        "- insônia ou alterações de comportamento",
+    ),
+    (
+        "multimorbidade",
+        "Paciente possui 5 ou mais doenças sistêmicas?\n"
+        "Ex: HAS, DM, insuficiência cardíaca, DAC, DRC, doença hepática crônica, AVE",
+    ),
     ("polifarmacia", "Paciente faz uso de 5 ou mais medicamentos regularmente?"),
-    ("fragilidade", "Paciente com fragilidade (CFS ≥ 4) OU baixa tolerância a esforço?\n"
-                    "Ex: cansa ao andar 1 quadra ou subir 1 lance de escadas (10 degraus), mobilidade reduzida/lentificada"),
+    (
+        "fragilidade",
+        "Paciente com fragilidade (CFS ≥ 4) OU baixa tolerância a esforço?\n"
+        "Ex: cansa ao andar 1 quadra ou subir 1 lance de escadas (10 degraus), mobilidade reduzida/lentificada",
+    ),
 ]
 
 FIELDS = [
@@ -261,7 +287,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "Olá, sou um bot para agendamento de consulta no Ambulatório de Geriatria PeriOp "
         "(uso exclusivo de cirurgiões).\n\n"
         "Clique abaixo no que deseja fazer agora:",
-        reply_markup=menu()
+        reply_markup=menu(),
     )
 
 async def on_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -275,7 +301,7 @@ async def on_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         key, question = ELIG_QUESTIONS[0]
         await q.edit_message_text(
             f"AVALIAR ELEGIBILIDADE\n\n{question}",
-            reply_markup=yesno(f"ELIG:{key}")
+            reply_markup=yesno(f"ELIG:{key}"),
         )
         return
 
@@ -325,174 +351,7 @@ async def on_elig(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     next_key, next_q = ELIG_QUESTIONS[step]
     await q.edit_message_text(
         f"AVALIAR ELEGIBILIDADE\n\n{next_q}",
-        reply_markup=yesno(f"ELIG:{next_key}")
+        reply_markup=yesno(f"ELIG:{next_key}"),
     )
 
-async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if ctx.user_data.get("mode") != "sched":
-        await update.message.reply_text("Use /start para abrir o menu.")
-        return
-
-    step = int(ctx.user_data.get("step", 0))
-    if step >= len(FIELDS):
-        return
-
-    field, _ = FIELDS[step]
-    value = (update.message.text or "").strip()
-    if not value:
-        await update.message.reply_text("Não entendi. Tente novamente.")
-        return
-
-    if field == "data_prevista":
-        parsed = parse_data_prevista(value)
-        if parsed is not None and parsed < _today_local():
-            await update.message.reply_text(
-                "⚠️ A data informada parece estar no passado.\n"
-                "Digite uma data futura (ex: 03/03/2026) ou uma previsão (ex: Abril/2026):"
-            )
-            return
-
-    ctx.user_data["data"][field] = value
-    step += 1
-    ctx.user_data["step"] = step
-
-    if step >= len(FIELDS):
-        d = ctx.user_data.get("data", {})
-        resumo = (
-            "📝 *CONFIRMAR SOLICITAÇÃO*\n\n"
-            f"Paciente: {d.get('nome','')}\n"
-            f"Prontuário: {d.get('prontuario','')}\n"
-            f"Cirurgião: {d.get('cirurgiao','')}\n"
-            f"Cirurgia proposta: {d.get('cirurgia','')}\n"
-            f"Data prevista: {d.get('data_prevista','')}\n"
-            f"Observações: {d.get('observacoes','')}\n\n"
-            "Deseja confirmar e escolher uma vaga na agenda?"
-        )
-        await update.message.reply_text(resumo, parse_mode="Markdown", reply_markup=confirm_kb())
-        return
-
-    await update.message.reply_text(FIELDS[step][1])
-
-async def on_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-
-    _, ans = q.data.split(":")
-
-    if ans == "NAO":
-        await q.edit_message_text("Solicitação cancelada.")
-        await q.message.reply_text("Menu:", reply_markup=menu())
-        reset(ctx)
-        return
-
-    d = ctx.user_data.get("data", {})
-    texto = (
-        "📝 CONFIRMAR SOLICITAÇÃO\n"
-        f"Paciente: {d.get('nome','')}\n"
-        f"Prontuário: {d.get('prontuario','')}\n"
-        f"Cirurgião: {d.get('cirurgiao','')}\n"
-        f"Cirurgia proposta: {d.get('cirurgia','')}\n"
-        f"Data prevista: {d.get('data_prevista','')}\n"
-        f"Observações: {d.get('observacoes','')}\n"
-    )
-    ctx.user_data["booking_text"] = texto
-
-    slots = find_slots()
-    if not slots:
-        await q.edit_message_text("⚠️ Sem vagas disponíveis no momento.")
-        await q.message.reply_text("Menu:", reply_markup=menu())
-        reset(ctx)
-        return
-
-    ctx.user_data["slots_cache"] = slots
-    await q.edit_message_text("Escolha uma vaga:", reply_markup=build_slots_kb(slots))
-
-async def on_slot(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-
-    if q.data == "SLOT:CANCEL":
-        await q.edit_message_text("Cancelado.")
-        await q.message.reply_text("Menu:", reply_markup=menu())
-        reset(ctx)
-        return
-
-    _, r, c = q.data.split(":")
-    r_i, c_i = int(r), int(c)
-
-    ok = book_slot(r_i, c_i, ctx.user_data.get("booking_text", ""))
-
-    # se ocupou, recarrega vagas atualizadas e mostra de novo
-    if not ok:
-        slots = find_slots()
-        if not slots:
-            await q.edit_message_text("⚠️ Essa vaga acabou de ser preenchida e não há outras disponíveis agora.")
-            await q.message.reply_text("Menu:", reply_markup=menu())
-            reset(ctx)
-            return
-
-        ctx.user_data["slots_cache"] = slots
-        await q.edit_message_text(
-            "⚠️ Essa vaga acabou de ser preenchida.\n"
-            "Selecione outra vaga disponível:",
-            reply_markup=build_slots_kb(slots)
-        )
-        return
-
-    # identifica label do slot escolhido (para log)
-    slot_label = ""
-    for s in (ctx.user_data.get("slots_cache") or []):
-        if s.get("row") == r_i and s.get("col") == c_i:
-            slot_label = s.get("label", "")
-            break
-
-    u = q.from_user
-    d = ctx.user_data.get("data", {})
-    now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
-
-    append_log({
-        "timestamp": now,
-        "caminho": "avaliacao_eligibilidade" if ctx.user_data.get("criterio") not in ("", "agendamento_direto") else "agendamento_direto",
-        "elegivel": ctx.user_data.get("eligible") or "SIM",
-        "criterio": ctx.user_data.get("criterio") or "",
-        "nome": d.get("nome", ""),
-        "prontuario": d.get("prontuario", ""),
-        "cirurgiao": d.get("cirurgiao", ""),
-        "cirurgia": d.get("cirurgia", ""),
-        "data_prevista": d.get("data_prevista", ""),
-        "observacoes": d.get("observacoes", ""),
-        "slot_escolhido": slot_label,
-        "telegram_id": str(u.id),
-        "telegram_user": u.username or "",
-    })
-
-    await q.edit_message_text("✅ Agendamento confirmado.")
-    await q.message.reply_text("Menu:", reply_markup=menu())
-    reset(ctx)
-
-def build_app():
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(on_menu, pattern=r"^MENU:"))
-    app.add_handler(CallbackQueryHandler(on_elig, pattern=r"^ELIG:"))
-    app.add_handler(CallbackQueryHandler(on_confirm, pattern=r"^CONFIRM:"))
-    app.add_handler(CallbackQueryHandler(on_slot, pattern=r"^SLOT:"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
-    return app
-
-if __name__ == "__main__":
-    tg_app = build_app()
-
-    if not RENDER_EXTERNAL_URL:
-        raise RuntimeError("Faltou RENDER_EXTERNAL_URL nas variáveis de ambiente do Render.")
-
-    # O webhook precisa bater exatamente em: https://.../webhook
-    webhook_url = f"{RENDER_EXTERNAL_URL.rstrip('/')}/{WEBHOOK_PATH}"
-
-    tg_app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path=WEBHOOK_PATH,          # <<< agora escuta em /webhook
-        webhook_url=webhook_url,        # <<< agora registra /webhook
-        drop_pending_updates=True,
-    )
+async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TY
